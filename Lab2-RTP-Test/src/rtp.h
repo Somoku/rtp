@@ -41,9 +41,11 @@ typedef struct RTP_sender{
 
 //TODO
 typedef struct RTP_receiver{
+    int seq_next; // Next expected pkt seq_num
     uint32_t window_size;
     char** recv_buf; // Pkt cache
     size_t* recv_length; //Pkt length in cache
+    size_t* recv_ack; // 1 for acked pkt
 } rtp_receiver_t;
 
 /**

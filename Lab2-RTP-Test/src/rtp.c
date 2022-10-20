@@ -1,6 +1,7 @@
 #include <sys/select.h>
 #include <time.h>
 #include <stdbool.h>
+#include <string.h>
 #include "util.h"
 #include "rtp.h"
 
@@ -36,21 +37,24 @@ int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t addrlen, rtp
     free(start_pkt);
 
     // Check whether ACK time out.
-    struct timeval timeout = {0, 100000}; // 100 ms
+    struct timeval timeout = {10, 0}; // 10s
     fd_set wait_fd;
+    FD_ZERO(&wait_fd);
     FD_SET(sockfd, &wait_fd);
     int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
     if(res == -1)
         return -1;
     else if(res == 0){
         // Handle timeout.
+        printf("Sender: timeout.\n");
         rtp_sendEND(sockfd, (struct sockaddr*)servaddr, addrlen, sender_control);
         return -1;
     }
     else if(FD_ISSET(sockfd, &wait_fd)){
         // Receive ACK and check its checksum.
-        rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, servaddr, &addrlen);
+        rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)servaddr, &addrlen);
         if(!recv_ack){
+            printf("Sender: broken ack.\n");
             rtp_sendEND(sockfd, (struct sockaddr*)servaddr, addrlen, sender_control);
             return -1;
         }
@@ -94,9 +98,10 @@ void rtp_sendEND(int sockfd, struct sockaddr* to, socklen_t tolen, rtp_sender_t*
     // If time out, return and close connection.
     // Else, check seq_num
     fd_set wait_fd;
-    FD_SET(sockfd, &wait_fd);
     struct timeval timeout = {0, 100000};
     while(true){
+        FD_ZERO(&wait_fd);
+        FD_SET(sockfd, &wait_fd);
         int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1 || res == 0)
             return;
@@ -122,24 +127,27 @@ void rtp_sendEND(int sockfd, struct sockaddr* to, socklen_t tolen, rtp_sender_t*
     return;
 }
 
-void rtp_freeControl(rtp_sender_t* control_sender){
-    if(!control_sender) return;
-    if(control_sender->send_buf){
-        for(int i=0; i < control_sender->window_size; i++)
-            if(control_sender->send_buf[i])
-                free(control_sender->send_buf[i]);
-        free(control_sender->send_buf);
+void rtp_freeSenderControl(rtp_sender_t* sender_control){
+    if(!sender_control) return;
+    if(sender_control->send_buf){
+        for(int i=0; i < sender_control->window_size; i++)
+            if(sender_control->send_buf[i])
+                free(sender_control->send_buf[i]);
+        free(sender_control->send_buf);
+        free(sender_control->send_length);
     }
-    free(control_sender);
+    free(sender_control);
 }
 
-void rtp_freeReceiverControl(rtp_receiver_t* control_receiver){
-    if(!control_receiver) return;
-    if(control_receiver->recv_buf){
-        for(int i = 0; i < control_receiver->window_size; i++)
-            if(control_receiver->recv_buf[i])
-                free(control_receiver->recv_buf[i]);
-        free(control_receiver->recv_buf);
+void rtp_freeReceiverControl(rtp_receiver_t* receiver_control){
+    if(!receiver_control) return;
+    if(receiver_control->recv_buf){
+        for(int i = 0; i < receiver_control->window_size; i++)
+            if(receiver_control->recv_buf[i])
+                free(receiver_control->recv_buf[i]);
+        free(receiver_control->recv_buf);
+        free(receiver_control->recv_ack);
+        free(receiver_control->recv_length);
     }
-    free(control_receiver);
+    free(receiver_control);
 }
