@@ -29,8 +29,10 @@ int initSender(const char* receiver_ip, uint16_t receiver_port, uint32_t window_
     sender_control->seq_next = 0;
     sender_control->send_buf = malloc(window_size * sizeof(char*));
     sender_control->send_length = malloc(window_size * sizeof(size_t));
+    sender_control->send_ack = malloc(window_size * sizeof(size_t));
     for(int i=0; i < window_size; ++i){
         sender_control->send_length[i] = 0;
+        sender_control->send_ack[i] = 0;
         sender_control->send_buf[i] = malloc(PAYLOAD_SIZE);
         memset(sender_control->send_buf[i], 0, PAYLOAD_SIZE);
     }
@@ -293,7 +295,7 @@ int sendMessageOpt(const char* message){
     while(true){
         FD_ZERO(&wait_fd);
         FD_SET(sockfd, &wait_fd);
-        struct timeval timeout = {0, 100000};
+        struct timeval timeout = {0, 100000}; // 100ms
         // printf("Sender: Waiting...\n");
         int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
@@ -309,6 +311,9 @@ int sendMessageOpt(const char* message){
             // printf("Sender: Time out. Resending...\n");
             // Resend message.
             for(int i=0; i < sender_control->window_size; i++){
+                // Send message not acked.
+                if(sender_control->send_ack[i] == 1)
+                    continue;
                 if(sender_control->send_length[i] == 0)
                     break;
                 rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[i], sender_control->seq_base + i, sender_control->send_buf[i]);
@@ -333,9 +338,15 @@ int sendMessageOpt(const char* message){
                 //printf("Sender: Receive ACK...\n");
                 //printf("Sender: received seq_num = %d\n", recv_ack->rtp.seq_num);
                 //printf("Sender: seq_base = %d\n", sender_control->seq_base);
-                if(recv_ack->rtp.seq_num >= sender_control->seq_base + 1){
+                if(recv_ack->rtp.seq_num == sender_control->seq_base){
                     // Update sliding window
-                    int sliding_num = recv_ack->rtp.seq_num - sender_control->seq_base;
+                    //int sliding_num = recv_ack->rtp.seq_num - sender_control->seq_base;
+                    int sliding_num = 0;
+                    sender_control->send_ack[0] = 1;
+                    for(;sliding_num < sender_control->window_size; sliding_num++){
+                        if(sender_control->send_ack[sliding_num] == 0)
+                            break;
+                    }
                     //printf("Sender: sliding_num = %d\n", sliding_num);
                     for(int i = sliding_num; i < sender_control->window_size; i++){
                         memset(sender_control->send_buf[i - sliding_num], 0, PAYLOAD_SIZE);
@@ -343,6 +354,7 @@ int sendMessageOpt(const char* message){
                             memcpy(sender_control->send_buf[i - sliding_num], sender_control->send_buf[i], sender_control->send_length[i]);
                         //memset(sender_control->send_buf[i], 0, PAYLOAD_SIZE);
                         sender_control->send_length[i - sliding_num] = sender_control->send_length[i];
+                        sender_control->send_ack[i - sliding_num] = sender_control->send_ack[i];
                         //sender_control->send_length[i] = 0;
                     }
                     for(int i = 0; i < sliding_num; i++){
@@ -353,9 +365,11 @@ int sendMessageOpt(const char* message){
                             memset(sender_control->send_buf[j], 0, PAYLOAD_SIZE);
                             sender_control->send_length[j] = 0;
                         }
+                        sender_control->send_ack[j] = 0;
                         //printf("Sender: Step i = %d, j = %d\n", i , j);
                     }
-                    sender_control->seq_base = recv_ack->rtp.seq_num;
+                    //sender_control->seq_base = recv_ack->rtp.seq_num;
+                    sender_control->seq_base += sliding_num;
                     //printf("Sender: Update finished.\n");
                     // printf("Sender: seq_base = %d\n", sender_control->seq_base);
                     
@@ -403,6 +417,10 @@ int sendMessageOpt(const char* message){
                         free(pkt);
                         sender_control->seq_next++;
                     }
+                }
+                else if(recv_ack->rtp.seq_num > sender_control->seq_base){
+                    int ack_num = recv_ack->rtp.seq_num - sender_control->seq_base;
+                    sender_control->send_ack[ack_num] = 1;
                 }
             }
             free(recv_ack);

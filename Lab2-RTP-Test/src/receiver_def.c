@@ -391,7 +391,7 @@ int recvMessageOpt(char* filename){
 
                         //printf("Receiver: Sending ACK...\n");
                         // Send ACK.
-                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
                         ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
@@ -454,7 +454,7 @@ int recvMessageOpt(char* filename){
                         }
 
                         // Send ACK.
-                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
                         ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
@@ -469,7 +469,7 @@ int recvMessageOpt(char* filename){
                     else{
                         // Send ACK.
                         //printf("Receiver: Sending ACK... seq_next = %d\n", receiver_control->seq_next);
-                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
                         ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);

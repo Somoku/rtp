@@ -37,6 +37,7 @@ typedef struct RTP_sender{
     uint32_t window_size;
     char** send_buf; // Pkt cache
     size_t* send_length; // Pkt length in cache
+    size_t* send_ack; // 1 for acked pkt
 } rtp_sender_t;
 
 //TODO

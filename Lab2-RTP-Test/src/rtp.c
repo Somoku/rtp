@@ -148,6 +148,7 @@ void rtp_freeSenderControl(rtp_sender_t* sender_control){
             if(sender_control->send_buf[i])
                 free(sender_control->send_buf[i]);
         free(sender_control->send_buf);
+        free(sender_control->send_ack);
         free(sender_control->send_length);
     }
     free(sender_control);
