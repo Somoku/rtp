@@ -33,6 +33,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
         receiver_control->recv_length[i] = 0;
         receiver_control->recv_ack[i] = 0;
         receiver_control->recv_buf[i] = malloc(PAYLOAD_SIZE);
+        memset(receiver_control->recv_buf[i], 0, PAYLOAD_SIZE);
     } 
 
     // Initialize sockaddr.
@@ -53,7 +54,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
     fd_set wait_fd;
     FD_ZERO(&wait_fd);
     FD_SET(sockfd, &wait_fd);
-    struct timeval timeout = {10, 0}; // 10s
+    struct timeval timeout = {20, 0}; // 15s
     int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
     if(res == -1){
         rtp_freeReceiverControl(receiver_control);
@@ -67,6 +68,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
     }
     else if(FD_ISSET(sockfd, &wait_fd)){
         // Receive START and check its checksum.
+        //printf("Receiver: START pkt received.\n");
         socklen_t addrlen = sizeof(addr);
         rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)&addr, &addrlen);
         if(!recv_ack){
@@ -90,6 +92,17 @@ int initReceiver(uint16_t port, uint32_t window_size){
             free(pkt);
             return 0;
         }
+        else if(recv_ack->rtp.type == RTP_END){
+            // Send ACK.
+            rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+            ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+            if(send_length != sizeof(rtp_header_t))
+                perror("Send failure");
+            free(pkt);
+            free(recv_ack);
+            rtp_freeReceiverControl(receiver_control);
+            return -1;
+        }
         else{
             free(recv_ack);
             rtp_freeReceiverControl(receiver_control);
@@ -103,7 +116,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
 int recvMessage(char* filename){
     //printf("Receiver: receiving data...\n");
     // Open file whose name is filename.
-    FILE* recv_file = fopen(filename, "w");
+    FILE* recv_file = fopen(filename, "wb");
     if(!recv_file){
         perror("Open file failure");
         return -1;
@@ -149,10 +162,11 @@ int recvMessage(char* filename){
                         return -1;
                     }
                     free(pkt);
-                    //TODO
+
                     if(recv_pkt->rtp.type == RTP_END && recv_pkt->rtp.seq_num == receiver_control->seq_next){
                         printf("Receiver: END and return.\n");
                         printf("Received byte = %d\n", recv_byte);
+                        fclose(recv_file);
                         free(recv_pkt);
                         return recv_byte;
                     }

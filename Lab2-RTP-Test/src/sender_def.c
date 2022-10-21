@@ -43,8 +43,10 @@ int initSender(const char* receiver_ip, uint16_t receiver_port, uint32_t window_
 
     // Connect to server.
     //printf("Sender: Connecting...\n");
-    int conn = rtp_connect(sockfd, &servaddr, sizeof(servaddr), sender_control);
+    socklen_t len = sizeof(servaddr);
+    int conn = rtp_connect(sockfd, &servaddr, &len, sender_control);
     if(conn == -1){
+        //printf("conn = -1\n");
         perror("Connection failure");
         close(sockfd);
         rtp_freeSenderControl(sender_control);
@@ -227,7 +229,8 @@ int sendMessage(const char* message){
 
 void terminateSender(){
     //printf("Sender: terminate.\n");
-    rtp_sendEND(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr), sender_control);
+    socklen_t len = sizeof(servaddr);
+    rtp_sendEND(sockfd, (struct sockaddr*)&servaddr, &len, sender_control);
     close(sockfd);
     rtp_freeSenderControl(sender_control);
     return;
