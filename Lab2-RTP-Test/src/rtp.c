@@ -37,7 +37,7 @@ int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t addrlen, rtp
     free(start_pkt);
 
     // Check whether ACK time out.
-    struct timeval timeout = {10, 0}; // 10s
+    struct timeval timeout = {1, 0}; // 1s
     fd_set wait_fd;
     FD_ZERO(&wait_fd);
     FD_SET(sockfd, &wait_fd);
@@ -98,10 +98,10 @@ void rtp_sendEND(int sockfd, struct sockaddr* to, socklen_t tolen, rtp_sender_t*
     // If time out, return and close connection.
     // Else, check seq_num
     fd_set wait_fd;
-    struct timeval timeout = {0, 100000};
     while(true){
         FD_ZERO(&wait_fd);
         FD_SET(sockfd, &wait_fd);
+        struct timeval timeout = {0, 100000};
         int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1 || res == 0)
             return;

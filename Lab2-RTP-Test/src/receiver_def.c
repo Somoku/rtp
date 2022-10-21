@@ -113,10 +113,10 @@ int recvMessage(char* filename){
 
     // Wait for data.
     fd_set wait_fd;
-    struct timeval timeout = {10, 0};
     while(true){
         FD_ZERO(&wait_fd);
         FD_SET(sockfd, &wait_fd);
+        struct timeval timeout = {10, 0};
         //printf("Receiver: Waiting for data...\n");
         int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
@@ -149,6 +149,7 @@ int recvMessage(char* filename){
                         return -1;
                     }
                     free(pkt);
+                    //TODO
                     if(recv_pkt->rtp.type == RTP_END && recv_pkt->rtp.seq_num == receiver_control->seq_next){
                         printf("Receiver: END and return.\n");
                         printf("Received byte = %d\n", recv_byte);
@@ -169,9 +170,12 @@ int recvMessage(char* filename){
                             free(recv_pkt);
                             continue;
                         }
+
                         //printf("Receiver: caching data... seq_num = %d\n", recv_pkt->rtp.seq_num);
                         //printf("Receiver: Now seq_next = %d\n", receiver_control->seq_next);
                         // Cache data.
+                        if(recv_pkt->rtp.length == 0)
+                            continue;
                         int ack_num = recv_pkt->rtp.seq_num - receiver_control->seq_next;
                         receiver_control->recv_ack[ack_num] = 1;
                         receiver_control->recv_length[ack_num] = recv_pkt->rtp.length;
@@ -195,6 +199,8 @@ int recvMessage(char* filename){
                     else if(recv_pkt->rtp.seq_num == receiver_control->seq_next){
                         //printf("Receiver: update sliding window...\n");
                         // Cache data.
+                        if(recv_pkt->rtp.length == 0)
+                            continue;
                         int ack_num = 0;
                         receiver_control->recv_ack[ack_num] = 1;
                         receiver_control->recv_length[ack_num] = recv_pkt->rtp.length;
@@ -220,19 +226,23 @@ int recvMessage(char* filename){
                             }
                             recv_byte += write_byte;
                         }
-                        printf("Receiver: recv_byte = %d\n", recv_byte);
+                        //printf("Receiver: recv_byte = %d\n", recv_byte);
                         
                         // Update sliding window.
                         for(int i = slide_step; i < receiver_control->window_size; i++){
-                            if(receiver_control->recv_length[i] == 0)
-                                continue;
                             memset(receiver_control->recv_buf[i - slide_step], 0, PAYLOAD_SIZE);
                             memcpy(receiver_control->recv_buf[i - slide_step], receiver_control->recv_buf[i], receiver_control->recv_length[i]);
-                            memset(receiver_control->recv_buf[i], 0, PAYLOAD_SIZE);
+                            // memset(receiver_control->recv_buf[i], 0, PAYLOAD_SIZE);
                             receiver_control->recv_length[i - slide_step] = receiver_control->recv_length[i];
-                            receiver_control->recv_length[i] = 0;
+                            // receiver_control->recv_length[i] = 0;
                             receiver_control->recv_ack[i - slide_step] = receiver_control->recv_ack[i];
-                            receiver_control->recv_ack[i] = 0;
+                            // receiver_control->recv_ack[i] = 0;
+                        }
+                        for(int i = 0; i < slide_step; i++){
+                            int j = receiver_control->window_size - 1 - i;
+                            memset(receiver_control->recv_buf[j], 0, PAYLOAD_SIZE);
+                            receiver_control->recv_length[j] = 0;
+                            receiver_control->recv_ack[j] = 0;
                         }
 
                         // Send ACK.
