@@ -8,7 +8,6 @@
 #include "rtp.h"
 #include "sender_def.h"
 
-//TODO: Remember to free sender_control
 rtp_sender_t* sender_control = NULL;
 struct sockaddr_in servaddr;
 int sockfd;
@@ -181,8 +180,8 @@ int sendMessage(const char* message){
                         size_t read_byte = fread(sender_control->send_buf[j], 1, PAYLOAD_SIZE, send_file);
                         if(read_byte == 0){
                             // free(sender_control->send_buf[j]);
-                            sender_control->send_buf[j] = NULL;
-                            sender_control->send_length[j] = 0;
+                            //sender_control->send_buf[j] = NULL;
+                            //sender_control->send_length[j] = 0;
                             break;
                         }
                         sender_control->send_length[j] = read_byte;
