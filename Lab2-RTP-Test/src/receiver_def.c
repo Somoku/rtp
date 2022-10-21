@@ -301,6 +301,189 @@ void terminateReceiver(){
     return;
 }
 
+
+/**
+ * @brief 用于接收数据并在接收完后断开RTP连接 (优化版本的RTP)
+ * @param filename 用于接收数据的文件名
+ * @return >0表示接收完成后到数据的字节数 -1表示出现其他错误
+ */
 int recvMessageOpt(char* filename){
-    return 0;
+    //printf("Receiver: receiving data...\n");
+    // Open file whose name is filename.
+    FILE* recv_file = fopen(filename, "wb");
+    if(!recv_file){
+        perror("Open file failure");
+        return -1;
+    }
+
+    int recv_byte = 0;
+
+    // Wait for data.
+    fd_set wait_fd;
+    while(true){
+        FD_ZERO(&wait_fd);
+        FD_SET(sockfd, &wait_fd);
+        struct timeval timeout = {10, 0};
+        //printf("Receiver: Waiting for data...\n");
+        int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+        if(res == -1){
+            perror("Select failure");
+            fclose(recv_file);
+            return -1;
+        }
+        else if(res == 0){
+            perror("Time out");
+            fclose(recv_file);
+            return recv_byte;
+        }
+        else if(FD_ISSET(sockfd, &wait_fd)){
+            // Receive data pkt.
+            //printf("Receiver: receive data...\n");
+            socklen_t addrlen = sizeof(addr);
+            rtp_packet_t* recv_pkt = rtp_recvfrom(sockfd, (struct sockaddr*)&addr, &addrlen);
+            if(!recv_pkt)
+                continue;
+            else{
+                if(recv_pkt->rtp.type == RTP_START || recv_pkt->rtp.type == RTP_END){
+                    //printf("Receiver: receive START or END.\n");
+                    rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
+                    ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                    if(send_length != sizeof(rtp_header_t)){
+                        free(pkt);
+                        free(recv_pkt);
+                        // rtp_freeReceiverControl(receiver_control);
+                        perror("Send failure");
+                        return -1;
+                    }
+                    free(pkt);
+
+                    if(recv_pkt->rtp.type == RTP_END && recv_pkt->rtp.seq_num == receiver_control->seq_next){
+                        printf("Receiver: END and return.\n");
+                        printf("Received byte = %d\n", recv_byte);
+                        fclose(recv_file);
+                        free(recv_pkt);
+                        return recv_byte;
+                    }
+                    else
+                        free(recv_pkt);
+                }
+                else if(recv_pkt->rtp.type == RTP_DATA){
+                    //printf("Receiver: receive DATA.\n");
+                    //printf("recv_pkt->rtp.seq_num = %d\n",recv_pkt->rtp.seq_num);
+                    //printf("receiver_control->seq_next = %d\n", receiver_control->seq_next);
+                    // printf("receiver_control->window_size = %d\n", receiver_control->window_size);
+                    if(recv_pkt->rtp.seq_num > receiver_control->seq_next){
+                        if(recv_pkt->rtp.seq_num > receiver_control->seq_next + receiver_control->window_size){
+                            //printf("Receiver: I'll free..\n");
+                            free(recv_pkt);
+                            continue;
+                        }
+
+                        //printf("Receiver: caching data... seq_num = %d\n", recv_pkt->rtp.seq_num);
+                        //printf("Receiver: Now seq_next = %d\n", receiver_control->seq_next);
+                        // Cache data.
+                        if(recv_pkt->rtp.length == 0)
+                            continue;
+                        int ack_num = recv_pkt->rtp.seq_num - receiver_control->seq_next;
+                        receiver_control->recv_ack[ack_num] = 1;
+                        receiver_control->recv_length[ack_num] = recv_pkt->rtp.length;
+                        memcpy(receiver_control->recv_buf[ack_num], recv_pkt->payload, recv_pkt->rtp.length);
+
+                        //printf("Receiver: Sending ACK...\n");
+                        // Send ACK.
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        if(send_length != sizeof(rtp_header_t)){
+                            free(pkt);
+                            free(recv_pkt);
+                            //rtp_freeReceiverControl(receiver_control);
+                            perror("Send failure");
+                            return -1;
+                        }
+                        free(recv_pkt);
+                        free(pkt);
+                        //printf("Receiver: End...\n");
+                    }
+                    else if(recv_pkt->rtp.seq_num == receiver_control->seq_next){
+                        //printf("Receiver: update sliding window...\n");
+                        // Cache data.
+                        if(recv_pkt->rtp.length == 0)
+                            continue;
+                        int ack_num = 0;
+                        receiver_control->recv_ack[ack_num] = 1;
+                        receiver_control->recv_length[ack_num] = recv_pkt->rtp.length;
+                        memcpy(receiver_control->recv_buf[ack_num], recv_pkt->payload, recv_pkt->rtp.length);
+
+                        // Update seq_next.
+                        int slide_step = 0;
+                        for(slide_step = 0; slide_step < receiver_control->window_size; slide_step++){
+                            if(receiver_control->recv_ack[slide_step] == 0)
+                                break;
+                        }
+                        receiver_control->seq_next += slide_step;
+                        //printf("Receiver: slide_step = %d\n", slide_step);
+                        //printf("Receiver: Now new seq_next = %d\n", receiver_control->seq_next);
+                        
+                        // Write to file.
+                        for(int i = 0; i < slide_step; i++){
+                            size_t write_byte = fwrite(receiver_control->recv_buf[i], 1, receiver_control->recv_length[i], recv_file);
+                            if(write_byte != receiver_control->recv_length[i]){
+                                free(recv_pkt);
+                                perror("Write failure");
+                                return -1;
+                            }
+                            recv_byte += write_byte;
+                        }
+                        //printf("Receiver: recv_byte = %d\n", recv_byte);
+                        
+                        // Update sliding window.
+                        for(int i = slide_step; i < receiver_control->window_size; i++){
+                            memset(receiver_control->recv_buf[i - slide_step], 0, PAYLOAD_SIZE);
+                            memcpy(receiver_control->recv_buf[i - slide_step], receiver_control->recv_buf[i], receiver_control->recv_length[i]);
+                            // memset(receiver_control->recv_buf[i], 0, PAYLOAD_SIZE);
+                            receiver_control->recv_length[i - slide_step] = receiver_control->recv_length[i];
+                            // receiver_control->recv_length[i] = 0;
+                            receiver_control->recv_ack[i - slide_step] = receiver_control->recv_ack[i];
+                            // receiver_control->recv_ack[i] = 0;
+                        }
+                        for(int i = 0; i < slide_step; i++){
+                            int j = receiver_control->window_size - 1 - i;
+                            memset(receiver_control->recv_buf[j], 0, PAYLOAD_SIZE);
+                            receiver_control->recv_length[j] = 0;
+                            receiver_control->recv_ack[j] = 0;
+                        }
+
+                        // Send ACK.
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        if(send_length != sizeof(rtp_header_t)){
+                            free(pkt);
+                            free(recv_pkt);
+                            //rtp_freeReceiverControl(receiver_control);
+                            perror("Send failure");
+                            return -1;
+                        }
+                        free(recv_pkt);
+                        free(pkt);
+                    }
+                    else{
+                        // Send ACK.
+                        //printf("Receiver: Sending ACK... seq_next = %d\n", receiver_control->seq_next);
+                        rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
+                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        if(send_length != sizeof(rtp_header_t)){
+                            free(pkt);
+                            free(recv_pkt);
+                            //rtp_freeReceiverControl(receiver_control);
+                            perror("Send failure");
+                            return -1;
+                        }
+                        free(recv_pkt);
+                        free(pkt);
+                    }
+                }
+            }
+        }
+    }
+    return -1;
 }
