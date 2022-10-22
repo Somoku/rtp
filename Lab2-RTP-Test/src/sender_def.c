@@ -10,16 +10,35 @@
 
 rtp_sender_t* sender_control = NULL;
 struct sockaddr_in servaddr;
-int sockfd;
+int sendfd;
 
 int initSender(const char* receiver_ip, uint16_t receiver_port, uint32_t window_size){
     // Create a socket.
     //printf("Sender: Creating a socket...\n");
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if(sockfd == -1){
+    sendfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if(sendfd == -1){
         perror("Socket failure");
         return -1;
     }
+
+    // Initialize server sockaddr.
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    inet_pton(AF_INET, receiver_ip, &servaddr.sin_addr);
+    servaddr.sin_port = htons(receiver_port);
+
+    // Connect to server.
+    //printf("Sender: Connecting...\n");
+    socklen_t len = sizeof(servaddr);
+    int conn = rtp_connect(sendfd, &servaddr, &len);
+    if(conn == -1){
+        //printf("conn = -1\n");
+        perror("Connection failure");
+        close(sendfd);
+        // rtp_freeSenderControl(sender_control);
+        return -1;
+    }
+    //printf("Sender: Connected.\n");
 
     // Initialize sender_control.
     //printf("Sender: Initializing sender_control...\n");
@@ -36,25 +55,6 @@ int initSender(const char* receiver_ip, uint16_t receiver_port, uint32_t window_
         sender_control->send_buf[i] = malloc(PAYLOAD_SIZE);
         memset(sender_control->send_buf[i], 0, PAYLOAD_SIZE);
     }
-
-    // Initialize server sockaddr.
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    inet_pton(AF_INET, receiver_ip, &servaddr.sin_addr);
-    servaddr.sin_port = htons(receiver_port);
-
-    // Connect to server.
-    //printf("Sender: Connecting...\n");
-    socklen_t len = sizeof(servaddr);
-    int conn = rtp_connect(sockfd, &servaddr, &len, sender_control);
-    if(conn == -1){
-        //printf("conn = -1\n");
-        perror("Connection failure");
-        close(sockfd);
-        rtp_freeSenderControl(sender_control);
-        return -1;
-    }
-    //printf("Sender: Connected.\n");
 
     return 0;
 }
@@ -93,7 +93,7 @@ int sendMessage(const char* message){
             break;
         // printf("Sender: sending message %d.\n", i);
         rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[i], sender_control->seq_base + i, sender_control->send_buf[i]);
-        ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+        ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
         if(send_len != sizeof(rtp_header_t) + sender_control->send_length[i]){
             free(pkt);
             fclose(send_file);
@@ -109,10 +109,10 @@ int sendMessage(const char* message){
     //printf("Sender: Waiting for ACK.\n");
     while(true){
         FD_ZERO(&wait_fd);
-        FD_SET(sockfd, &wait_fd);
+        FD_SET(sendfd, &wait_fd);
         struct timeval timeout = {0, 100000};
         // printf("Sender: Waiting...\n");
-        int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+        int res = select(sendfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
             perror("Select failure");
             fclose(send_file);
@@ -129,7 +129,7 @@ int sendMessage(const char* message){
                 if(sender_control->send_length[i] == 0)
                     break;
                 rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[i], sender_control->seq_base + i, sender_control->send_buf[i]);
-                ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+                ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
                 if(send_len != sizeof(rtp_header_t) + sender_control->send_length[i]){
                     free(pkt);
                     fclose(send_file);
@@ -139,10 +139,10 @@ int sendMessage(const char* message){
                 free(pkt);
             }
         }
-        else if(FD_ISSET(sockfd, &wait_fd)){
+        else if(FD_ISSET(sendfd, &wait_fd)){
             // Receive ACK and check its checksum.
             socklen_t addrlen = sizeof(servaddr);
-            rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)&servaddr, &addrlen);
+            rtp_packet_t* recv_ack = rtp_recvfrom(sendfd, (struct sockaddr*)&servaddr, &addrlen);
             if(!recv_ack)
                 // If ACK pkt is broken
                 continue;
@@ -210,7 +210,7 @@ int sendMessage(const char* message){
                             break;
                         //printf("Sender: sending message. seq_next = %d\n", sender_control->seq_next);
                         rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[j], sender_control->seq_base + j, sender_control->send_buf[j]);
-                        ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[j], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+                        ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[j], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
                         if(send_len != sizeof(rtp_header_t) + sender_control->send_length[j]){
                             free(pkt);
                             perror("Data send failure");
@@ -232,8 +232,8 @@ int sendMessage(const char* message){
 void terminateSender(){
     //printf("Sender: terminate.\n");
     socklen_t len = sizeof(servaddr);
-    rtp_sendEND(sockfd, (struct sockaddr*)&servaddr, &len, sender_control);
-    close(sockfd);
+    rtp_sendEND(sendfd, (struct sockaddr*)&servaddr, &len, sender_control);
+    close(sendfd);
     rtp_freeSenderControl(sender_control);
     return;
 }
@@ -278,7 +278,7 @@ int sendMessageOpt(const char* message){
             break;
         // printf("Sender: sending message %d.\n", i);
         rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[i], sender_control->seq_base + i, sender_control->send_buf[i]);
-        ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+        ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
         if(send_len != sizeof(rtp_header_t) + sender_control->send_length[i]){
             free(pkt);
             fclose(send_file);
@@ -294,10 +294,10 @@ int sendMessageOpt(const char* message){
     //printf("Sender: Waiting for ACK.\n");
     while(true){
         FD_ZERO(&wait_fd);
-        FD_SET(sockfd, &wait_fd);
+        FD_SET(sendfd, &wait_fd);
         struct timeval timeout = {0, 100000}; // 100ms
         // printf("Sender: Waiting...\n");
-        int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+        int res = select(sendfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
             perror("Select failure");
             fclose(send_file);
@@ -317,7 +317,7 @@ int sendMessageOpt(const char* message){
                 if(sender_control->send_length[i] == 0)
                     break;
                 rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[i], sender_control->seq_base + i, sender_control->send_buf[i]);
-                ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+                ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[i], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
                 if(send_len != sizeof(rtp_header_t) + sender_control->send_length[i]){
                     free(pkt);
                     fclose(send_file);
@@ -327,10 +327,10 @@ int sendMessageOpt(const char* message){
                 free(pkt);
             }
         }
-        else if(FD_ISSET(sockfd, &wait_fd)){
+        else if(FD_ISSET(sendfd, &wait_fd)){
             // Receive ACK and check its checksum.
             socklen_t addrlen = sizeof(servaddr);
-            rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)&servaddr, &addrlen);
+            rtp_packet_t* recv_ack = rtp_recvfrom(sendfd, (struct sockaddr*)&servaddr, &addrlen);
             if(!recv_ack)
                 // If ACK pkt is broken
                 continue;
@@ -392,7 +392,6 @@ int sendMessageOpt(const char* message){
 
                     // No more message to send.
                     if(sender_control->seq_base >= message_num){
-                        printf("Sender: Quit...\n");
                         free(recv_ack);
                         break;
                     }
@@ -407,7 +406,7 @@ int sendMessageOpt(const char* message){
                             break;
                         //printf("Sender: sending message. seq_next = %d\n", sender_control->seq_next);
                         rtp_packet_t* pkt = rtp_packet(RTP_DATA, sender_control->send_length[j], sender_control->seq_base + j, sender_control->send_buf[j]);
-                        ssize_t send_len = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[j], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
+                        ssize_t send_len = sendto(sendfd, (void*)pkt, sizeof(rtp_header_t) + sender_control->send_length[j], 0, (struct sockaddr*)&servaddr, sizeof(servaddr));
                         if(send_len != sizeof(rtp_header_t) + sender_control->send_length[j]){
                             free(pkt);
                             perror("Data send failure");

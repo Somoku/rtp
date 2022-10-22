@@ -8,15 +8,15 @@
 #include "rtp.h"
 #include "receiver_def.h"
 
-int sockfd;
+int recvfd;
 struct sockaddr_in addr;
 rtp_receiver_t* receiver_control = NULL;
 
 int initReceiver(uint16_t port, uint32_t window_size){
     // Create a socket.
     //printf("Receiver: Creating socket...\n");
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if(sockfd == -1){
+    recvfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if(recvfd == -1){
         perror("Socket failure");
         return -1;
     }
@@ -43,7 +43,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
     addr.sin_port = htons(port);
 
     //printf("Receiver: Binding...\n");
-    if(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) == -1){
+    if(bind(recvfd, (struct sockaddr *)&addr, sizeof(addr)) == -1){
         rtp_freeReceiverControl(receiver_control);
         perror("Bind failure");
         return -1;
@@ -53,9 +53,9 @@ int initReceiver(uint16_t port, uint32_t window_size){
     //printf("Receiver: Waiting for START pkt...\n");
     fd_set wait_fd;
     FD_ZERO(&wait_fd);
-    FD_SET(sockfd, &wait_fd);
-    struct timeval timeout = {20, 0}; // 15s
-    int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+    FD_SET(recvfd, &wait_fd);
+    struct timeval timeout = {5, 0}; // 5s
+    int res = select(recvfd + 1, &wait_fd, NULL, NULL, &timeout);
     if(res == -1){
         rtp_freeReceiverControl(receiver_control);
         return -1;
@@ -63,24 +63,24 @@ int initReceiver(uint16_t port, uint32_t window_size){
     else if(res == 0){
         // Timeout
         rtp_freeReceiverControl(receiver_control);
-        close(sockfd);
+        close(recvfd);
         return -1;
     }
-    else if(FD_ISSET(sockfd, &wait_fd)){
+    else if(FD_ISSET(recvfd, &wait_fd)){
         // Receive START and check its checksum.
         //printf("Receiver: START pkt received.\n");
         socklen_t addrlen = sizeof(addr);
-        rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)&addr, &addrlen);
+        rtp_packet_t* recv_ack = rtp_recvfrom(recvfd, (struct sockaddr*)&addr, &addrlen);
         if(!recv_ack){
             rtp_freeReceiverControl(receiver_control);
-            close(sockfd);
+            close(recvfd);
             return -1;
         }
         else if(recv_ack->rtp.type == RTP_START){
             // Send ACK.
             //printf("Receiver: Receive RTP_START.\n");
             rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_ack->rtp.seq_num, NULL);
-            ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+            ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
             if(send_length != sizeof(rtp_header_t)){
                 free(pkt);
                 free(recv_ack);
@@ -95,7 +95,7 @@ int initReceiver(uint16_t port, uint32_t window_size){
         else if(recv_ack->rtp.type == RTP_END){
             // Send ACK.
             rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
-            ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+            ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
             if(send_length != sizeof(rtp_header_t))
                 perror("Send failure");
             free(pkt);
@@ -128,10 +128,10 @@ int recvMessage(char* filename){
     fd_set wait_fd;
     while(true){
         FD_ZERO(&wait_fd);
-        FD_SET(sockfd, &wait_fd);
-        struct timeval timeout = {10, 0};
+        FD_SET(recvfd, &wait_fd);
+        struct timeval timeout = {10, 0}; //10s
         //printf("Receiver: Waiting for data...\n");
-        int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+        int res = select(recvfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
             perror("Select failure");
             fclose(recv_file);
@@ -142,18 +142,18 @@ int recvMessage(char* filename){
             fclose(recv_file);
             return recv_byte;
         }
-        else if(FD_ISSET(sockfd, &wait_fd)){
+        else if(FD_ISSET(recvfd, &wait_fd)){
             // Receive data pkt.
             //printf("Receiver: receive data...\n");
             socklen_t addrlen = sizeof(addr);
-            rtp_packet_t* recv_pkt = rtp_recvfrom(sockfd, (struct sockaddr*)&addr, &addrlen);
+            rtp_packet_t* recv_pkt = rtp_recvfrom(recvfd, (struct sockaddr*)&addr, &addrlen);
             if(!recv_pkt)
                 continue;
             else{
                 if(recv_pkt->rtp.type == RTP_START || recv_pkt->rtp.type == RTP_END){
                     //printf("Receiver: receive START or END.\n");
                     rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
-                    ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                    ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                     if(send_length != sizeof(rtp_header_t)){
                         free(pkt);
                         free(recv_pkt);
@@ -198,7 +198,7 @@ int recvMessage(char* filename){
                         //printf("Receiver: Sending ACK...\n");
                         // Send ACK.
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);
@@ -261,7 +261,7 @@ int recvMessage(char* filename){
 
                         // Send ACK.
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);
@@ -276,7 +276,7 @@ int recvMessage(char* filename){
                         // Send ACK.
                         //printf("Receiver: Sending ACK... seq_next = %d\n", receiver_control->seq_next);
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, receiver_control->seq_next, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);
@@ -297,7 +297,7 @@ int recvMessage(char* filename){
 void terminateReceiver(){
     //printf("Receiver: terminate...\n");
     rtp_freeReceiverControl(receiver_control);
-    close(sockfd);
+    close(recvfd);
     return;
 }
 
@@ -322,10 +322,10 @@ int recvMessageOpt(char* filename){
     fd_set wait_fd;
     while(true){
         FD_ZERO(&wait_fd);
-        FD_SET(sockfd, &wait_fd);
+        FD_SET(recvfd, &wait_fd);
         struct timeval timeout = {10, 0};
         //printf("Receiver: Waiting for data...\n");
-        int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
+        int res = select(recvfd + 1, &wait_fd, NULL, NULL, &timeout);
         if(res == -1){
             perror("Select failure");
             fclose(recv_file);
@@ -336,18 +336,18 @@ int recvMessageOpt(char* filename){
             fclose(recv_file);
             return recv_byte;
         }
-        else if(FD_ISSET(sockfd, &wait_fd)){
+        else if(FD_ISSET(recvfd, &wait_fd)){
             // Receive data pkt.
             //printf("Receiver: receive data...\n");
             socklen_t addrlen = sizeof(addr);
-            rtp_packet_t* recv_pkt = rtp_recvfrom(sockfd, (struct sockaddr*)&addr, &addrlen);
+            rtp_packet_t* recv_pkt = rtp_recvfrom(recvfd, (struct sockaddr*)&addr, &addrlen);
             if(!recv_pkt)
                 continue;
             else{
                 if(recv_pkt->rtp.type == RTP_START || recv_pkt->rtp.type == RTP_END){
                     //printf("Receiver: receive START or END.\n");
                     rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
-                    ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                    ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                     if(send_length != sizeof(rtp_header_t)){
                         free(pkt);
                         free(recv_pkt);
@@ -392,7 +392,7 @@ int recvMessageOpt(char* filename){
                         //printf("Receiver: Sending ACK...\n");
                         // Send ACK.
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);
@@ -455,7 +455,7 @@ int recvMessageOpt(char* filename){
 
                         // Send ACK.
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);
@@ -470,7 +470,7 @@ int recvMessageOpt(char* filename){
                         // Send ACK.
                         //printf("Receiver: Sending ACK... seq_next = %d\n", receiver_control->seq_next);
                         rtp_packet_t* pkt = rtp_packet(RTP_ACK, 0, recv_pkt->rtp.seq_num, NULL);
-                        ssize_t send_length = sendto(sockfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
+                        ssize_t send_length = sendto(recvfd, (void*)pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)&addr, addrlen);
                         if(send_length != sizeof(rtp_header_t)){
                             free(pkt);
                             free(recv_pkt);

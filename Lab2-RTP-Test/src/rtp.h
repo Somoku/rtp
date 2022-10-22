@@ -55,11 +55,10 @@ typedef struct RTP_receiver{
  * @param sockfd Sender's socket fd
  * @param servaddr Receiver's address
  * @param addrlen A pointer to address length
- * @param sender_control Sender control unit to support sliding window
  * @return -1 means failure, 0 means success
  * @cite https://www.man7.org/linux/man-pages/man3/FD_SET.3.html
 */
-int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen, rtp_sender_t* sender_control);
+int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen);
 
 /**
  * @brief Create a RTP packet
