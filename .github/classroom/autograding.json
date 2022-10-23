@@ -2,7 +2,7 @@
   "tests": [
     {
       "name": "NO_FAILURE",
-      "setup": "cd Lab2-RTP-Test && cmake . && make",
+      "setup": "pwd && cd Lab2-RTP-Test && cmake . && make",
       "run": "./rtp_test_all --gtest_filter=RTP.NO_FAILURE",
       "input": "",
       "output": "",
