@@ -164,8 +164,8 @@ int recvMessage(char* filename){
                     free(pkt);
 
                     if(recv_pkt->rtp.type == RTP_END && recv_pkt->rtp.seq_num == receiver_control->seq_next){
-                        printf("Receiver: END and return.\n");
-                        printf("Received byte = %d\n", recv_byte);
+                        //printf("Receiver: END and return.\n");
+                        //printf("Received byte = %d\n", recv_byte);
                         fclose(recv_file);
                         free(recv_pkt);
                         return recv_byte;

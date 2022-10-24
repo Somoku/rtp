@@ -195,7 +195,7 @@ int sendMessage(const char* message){
 
                     // No more message to send.
                     if(sender_control->seq_base >= message_num){
-                        printf("Sender: Quit...\n");
+                        //printf("Sender: Quit...\n");
                         free(recv_ack);
                         break;
                     }
