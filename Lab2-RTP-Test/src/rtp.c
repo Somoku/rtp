@@ -28,18 +28,17 @@ int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen){
     rtp_packet_t* start_pkt = rtp_packet(RTP_START, 0, seq, NULL);
 
     // Send packet for connection.
-    //printf("Sender: Sending START.\n");
     ssize_t send_length = sendto(sockfd, (void*)start_pkt, sizeof(rtp_header_t), 0, (struct sockaddr*)servaddr, *addrlen);
     if(send_length != sizeof(rtp_header_t)){
         free(start_pkt);
-        perror("Send failure");
+        perror("Start failure");
         return -1;
     }
 
     free(start_pkt);
 
     // Check whether ACK time out.
-    struct timeval timeout = {5, 0}; // 20s
+    struct timeval timeout = {10, 0}; // 10s
     fd_set wait_fd;
     FD_ZERO(&wait_fd);
     FD_SET(sockfd, &wait_fd);
@@ -48,21 +47,26 @@ int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen){
         return -1;
     else if(res == 0){
         // Handle timeout.
-        perror("Timeout");
+        fprintf(stderr, "[Sender] ACK timeout.\n");
         rtp_sendEND(sockfd, (struct sockaddr*)servaddr, addrlen, NULL);
         return -1;
     }
     else if(FD_ISSET(sockfd, &wait_fd)){
-        //printf("Sender: Received ACK.\n");
         // Receive ACK and check its checksum.
         rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, (struct sockaddr*)servaddr, addrlen);
         if(!recv_ack){
+            // Handle wrong checksum.
             rtp_sendEND(sockfd, (struct sockaddr*)servaddr, addrlen, NULL);
             return -1;
         }
         else if(recv_ack->rtp.type == RTP_ACK){
             free(recv_ack);
             return 0;
+        }
+        else{
+            free(recv_ack);
+            perror("[Sender] Weird failure");
+            return -1;
         }
     }
     return 0;
@@ -79,7 +83,8 @@ rtp_packet_t* rtp_recvfrom(int sockfd, struct sockaddr* from, socklen_t* fromlen
     }
     uint32_t checksum = recv_pkt->rtp.checksum;
     recv_pkt->rtp.checksum = 0;
-    if(checksum != compute_checksum(recv_pkt, recv_length)){
+    if(checksum != compute_checksum((void*)recv_pkt, recv_length)){
+        // Handle wrong checksum.
         free(recv_pkt);
         return NULL;
     }
@@ -92,13 +97,12 @@ void rtp_sendEND(int sockfd, struct sockaddr* to, socklen_t* tolen, rtp_sender_t
     if(sender_control != NULL)
         seq_next = sender_control->seq_next;
 
-    //perror("Sending END...");
     // Send End packet.
     rtp_packet_t* end_pkt = rtp_packet(RTP_END, 0, seq_next, NULL);
     ssize_t end_length = sendto(sockfd, (void*)end_pkt, sizeof(rtp_header_t), 0, to, *tolen);
     if(end_length != sizeof(rtp_header_t)){
         free(end_pkt);
-        perror("End send failure");
+        perror("End failure");
         return;
     }
     free(end_pkt);
@@ -107,34 +111,23 @@ void rtp_sendEND(int sockfd, struct sockaddr* to, socklen_t* tolen, rtp_sender_t
     // If time out, return and close connection.
     // Else, check seq_num
     
-    //perror("Waiting for ACK");
     fd_set wait_fd;
     while(true){
         FD_ZERO(&wait_fd);
         FD_SET(sockfd, &wait_fd);
         struct timeval timeout = {0, 100000}; //100ms
         int res = select(sockfd + 1, &wait_fd, NULL, NULL, &timeout);
-        //perror("res");
         if(res == -1 || res == 0)
             return;
         else if(FD_ISSET(sockfd, &wait_fd)){
-            // Receive ACK and check its checksum.
-            //perror("recvfrom");
             rtp_packet_t* recv_ack = rtp_recvfrom(sockfd, to, tolen);
-            //TODO: What if END loss or wrong END ACK.
-            if(!recv_ack){
-                //perror("ACK wrong");
-                rtp_sendEND(sockfd, to, tolen, sender_control);
-                return;
-            }
+            if(!recv_ack)
+                continue;
             else if(recv_ack->rtp.seq_num != seq_next){
-                //TODO: Handle response with different seq_num
-                //perror("Invalid seq_num");
                 free(recv_ack);
                 continue;
             }
             else{
-                //perror("Success");
                 free(recv_ack);
                 break;
             }
@@ -150,9 +143,11 @@ void rtp_freeSenderControl(rtp_sender_t* sender_control){
             if(sender_control->send_buf[i])
                 free(sender_control->send_buf[i]);
         free(sender_control->send_buf);
-        free(sender_control->send_ack);
-        free(sender_control->send_length);
     }
+    if(sender_control->send_ack)
+        free(sender_control->send_ack);
+    if(sender_control->send_length)
+        free(sender_control->send_length);
     free(sender_control);
 }
 
@@ -163,8 +158,10 @@ void rtp_freeReceiverControl(rtp_receiver_t* receiver_control){
             if(receiver_control->recv_buf[i])
                 free(receiver_control->recv_buf[i]);
         free(receiver_control->recv_buf);
-        free(receiver_control->recv_ack);
-        free(receiver_control->recv_length);
     }
+    if(receiver_control->recv_ack)
+        free(receiver_control->recv_ack);
+    if(receiver_control->recv_length)
+        free(receiver_control->recv_length);
     free(receiver_control);
 }

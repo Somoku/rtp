@@ -32,21 +32,20 @@ typedef struct __attribute__ ((__packed__)) RTP_packet {
 } rtp_packet_t;
 
 typedef struct RTP_sender{
-    int seq_base; // First pkt waiting for ACK
-    int seq_next; // Next pkt to be sent
+    int seq_base;          // First pkt waiting for ACK
+    int seq_next;          // Next pkt to be sent
     uint32_t window_size;
-    char** send_buf; // Pkt cache
-    size_t* send_length; // Pkt length in cache
-    size_t* send_ack; // 1 for acked pkt
+    char** send_buf;       // Pkt cache
+    size_t* send_length;   // Pkt length in cache
+    size_t* send_ack;      // 1 for acked pkt
 } rtp_sender_t;
 
-//TODO
 typedef struct RTP_receiver{
-    int seq_next; // Next expected pkt seq_num
+    int seq_next;          // Next expected pkt seq_num
     uint32_t window_size;
-    char** recv_buf; // Pkt cache
-    size_t* recv_length; //Pkt length in cache
-    size_t* recv_ack; // 1 for acked pkt
+    char** recv_buf;       // Pkt cache
+    size_t* recv_length;   // Pkt length in cache
+    size_t* recv_ack;      // 1 for acked pkt
 } rtp_receiver_t;
 
 /**
@@ -61,7 +60,7 @@ typedef struct RTP_receiver{
 int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen);
 
 /**
- * @brief Create a RTP packet
+ * @brief Create a RTP packet of specific type
  * @note Remember to free returned packet after use
  * @author Sheng Lin
  * @param type RTP segment type
@@ -73,8 +72,8 @@ int rtp_connect(int sockfd, struct sockaddr_in* servaddr, socklen_t* addrlen);
 rtp_packet_t* rtp_packet(uint8_t type, uint16_t length, uint32_t seq_num, char* message);
 
 /**
- * @brief Receive a RTP packet and verify its checksum
- * @note Remember to free returned packet after use
+ * @brief Receive a RTP packet and verify its checksum.
+ * Remember to free returned packet.
  * @author Sheng Lin
  * @param sockfd Receiver's socket fd
  * @param from Sender's address
@@ -85,8 +84,8 @@ rtp_packet_t* rtp_recvfrom(int sockfd, struct sockaddr* from, socklen_t* fromlen
 
 /**
  * @brief Send END packet and wait for ACK with correct seq_num.
- * Return when time out or receive ACK
- * @note Remember to close connection after return
+ * Return when time out or receive ACK.
+ * Remember to close connection after return.
  * @author Sheng Lin
  * @param sockfd Sender's socket fd
  * @param to Receiver's address
