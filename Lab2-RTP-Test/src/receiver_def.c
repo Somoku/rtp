@@ -161,7 +161,7 @@ int recvMessage(char* filename){
                 }
                 else if(recv_pkt->rtp.type == RTP_DATA){
                     if(recv_pkt->rtp.seq_num > receiver_control->seq_next){
-                        if(recv_pkt->rtp.seq_num > receiver_control->seq_next + receiver_control->window_size){
+                        if(recv_pkt->rtp.seq_num >= receiver_control->seq_next + receiver_control->window_size){
                             free(recv_pkt);
                             continue;
                         }
