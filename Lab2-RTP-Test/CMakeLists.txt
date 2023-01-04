@@ -33,6 +33,12 @@ target_link_libraries(rtpsender PUBLIC rtpall)
 add_library(rtpreceiver src/receiver_def.c)
 target_link_libraries(rtpreceiver PUBLIC rtpall)
 
+add_executable(rtp_receiver src/receiver.c src/receiver_def.c src/rtp.c src/util.c)
+
+add_executable(rtp_sender src/sender.c src/sender_def.c src/rtp.c src/util.c)
+
+add_executable(diff src/diff.c)
+
 add_executable(rtp_test_all
 		src/test.cpp
 )
